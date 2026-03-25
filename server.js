@@ -3,9 +3,9 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
 const db = require('./db');
-const Blockchain = require('../blockchain-core/blockchain/blockchain');
-const Block = require('../blockchain-core/blockchain/block');
-const { Transaction } = require('../blockchain-core/blockchain/transaction');
+const Blockchain = require('./blockchain');
+const Block = require('./block');
+const { Transaction } = require('./transaction');
 
 const app = express();
 app.use(cors());

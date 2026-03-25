@@ -1,10 +1,10 @@
-// db.js - MySQL Connection for Nexaris
+// db.js - Database connection for Nexaris
 const mysql = require('mysql2/promise');
 
 const pool = mysql.createPool({
     host: 'localhost',
-    user: 'root', // your MySQL username
-    password: '', // your MySQL password (leave empty if none)
+    user: 'root',
+    password: '',
     database: 'nexaris',
     waitForConnections: true,
     connectionLimit: 10,
@@ -23,7 +23,7 @@ async function testConnection() {
     }
 }
 
-// User functions
+// ==================== USER FUNCTIONS ====================
 async function createUser(email, passwordHash, fullName) {
     const [result] = await pool.execute(
         'INSERT INTO users (email, password_hash, full_name) VALUES (?, ?, ?)',
@@ -48,59 +48,95 @@ async function getUserById(id) {
     return rows[0];
 }
 
-// Wallet functions
-async function saveWallet(userId, walletData) {
+// ==================== BLOCKCHAIN PERSISTENCE ====================
+async function saveBlock(block) {
     const [result] = await pool.execute(
-        `INSERT INTO wallets 
-         (user_id, wallet_name, address, encrypted_private_key, public_key, mnemonic_phrase, is_default) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [userId, walletData.name, walletData.address, walletData.encryptedKey, 
-         walletData.publicKey, walletData.mnemonic, walletData.isDefault || false]
+        `INSERT INTO blocks (block_index, block_hash, previous_hash, timestamp, nonce, difficulty, miner_address, tx_count, size, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+         block_hash = VALUES(block_hash),
+         previous_hash = VALUES(previous_hash),
+         timestamp = VALUES(timestamp),
+         nonce = VALUES(nonce),
+         difficulty = VALUES(difficulty),
+         miner_address = VALUES(miner_address),
+         tx_count = VALUES(tx_count),
+         size = VALUES(size),
+         version = VALUES(version)`,
+        [
+            block.index,
+            block.hash,
+            block.previousHash,
+            block.timestamp,
+            block.nonce,
+            block.difficulty,
+            block.miner || null,
+            block.transactions.length,
+            block.size,
+            block.version
+        ]
     );
     return result.insertId;
 }
 
-async function getUserWallets(userId) {
+async function loadBlocks() {
     const [rows] = await pool.execute(
-        'SELECT * FROM wallets WHERE user_id = ? ORDER BY is_default DESC, created_at DESC',
-        [userId]
+        `SELECT * FROM blocks ORDER BY block_index ASC`
     );
     return rows;
 }
 
-// Transaction functions
-async function saveTransaction(txData) {
+async function saveTransaction(tx, blockIndex) {
     const [result] = await pool.execute(
-        `INSERT INTO transactions 
-         (tx_hash, user_id, wallet_id, from_address, to_address, amount, asset_id, fee, status, type, timestamp) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [txData.tx_hash, txData.user_id, txData.wallet_id, txData.from, txData.to, 
-         txData.amount, txData.asset_id, txData.fee, txData.status, txData.type, txData.timestamp]
+        `INSERT INTO chain_transactions (tx_hash, from_address, to_address, amount, fee, timestamp, block_index, data, signature, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+         block_index = VALUES(block_index)`,
+        [
+            tx.id,
+            tx.from || null,
+            tx.to,
+            tx.amount,
+            tx.fee || 0.0001,
+            tx.timestamp,
+            blockIndex,
+            tx.data || '',
+            tx.signature || '',
+            tx.version || '1.0.0'
+        ]
     );
     return result.insertId;
 }
 
-async function getUserTransactions(userId, limit = 50) {
+async function loadTransactions(blockIndex = null) {
+    let sql = `SELECT * FROM chain_transactions`;
+    const params = [];
+    if (blockIndex !== null) {
+        sql += ` WHERE block_index = ?`;
+        params.push(blockIndex);
+    }
+    sql += ` ORDER BY timestamp ASC`;
+    const [rows] = await pool.execute(sql, params);
+    return rows;
+}
+
+async function loadAllTransactions() {
     const [rows] = await pool.execute(
-        `SELECT t.*, a.symbol, a.name as asset_name 
-         FROM transactions t
-         JOIN assets a ON t.asset_id = a.id
-         WHERE t.user_id = ?
-         ORDER BY t.timestamp DESC
-         LIMIT ?`,
-        [userId, limit]
+        `SELECT * FROM chain_transactions ORDER BY timestamp ASC`
     );
     return rows;
 }
 
+// ==================== EXPORTS ====================
 module.exports = {
     testConnection,
     createUser,
     getUserByEmail,
     getUserById,
-    saveWallet,
-    getUserWallets,
+    saveBlock,
+    loadBlocks,
     saveTransaction,
-    getUserTransactions,
+    loadTransactions,
+    loadAllTransactions,
     pool
 };
